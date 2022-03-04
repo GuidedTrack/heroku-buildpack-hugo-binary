@@ -1,0 +1,103 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "net/http"
+require "open-uri"
+
+HUGO_RELEASES_URI = URI("https://github.com/gohugoio/hugo/releases/")
+
+# File tools ###############################################
+
+def clear_dir(path)
+  FileUtils.rm_r(Dir.glob(File.join(path, "*")))
+end
+
+# Credits:
+# - https://stackoverflow.com/a/29743469/5091738
+# - https://docs.rubocop.org/rubocop/cops_security.html#securityopen
+def download_file(uri, path)
+  IO.copy_stream(uri.open, path)
+end
+
+def ensure_dir(path)
+  Dir.mkdir(path) unless Dir.exist?(path)
+end
+
+def unpack_tarball(in_path, out_dir_path)
+  system("tar", "xzf", in_path, "--directory", out_dir_path)
+end
+
+# Buildpack tools ##########################################
+
+def buildpack_dir
+  File.dirname(__dir__)
+end
+
+def add_to_PATH(path)
+  File.open(File.join(buildpack_dir, "export"), "w") do |f|
+    f << "export PATH=\"#{ENV["PATH"]}:#{path}\""
+    f << "\n"
+  end
+end
+
+def log_step(msg)
+  puts("-----> #{msg}")
+end
+
+def log_info(msg)
+  puts("       #{msg}")
+end
+
+# Hugo releases ############################################
+
+def hugo_version(release_uri)
+  release_uri.path.match(%r{/v ([\d\w.-]+) $}x)[1]
+end
+
+def get_latest_hugo_version
+  response = Net::HTTP.get_response(URI.join(HUGO_RELEASES_URI, "latest"))
+  if !response.instance_of?(Net::HTTPFound)
+    raise "Unexpected response from Hugo releases page: #{response}"
+  end
+
+  hugo_version(URI(response["Location"]))
+end
+
+def tarball_name(version)
+  "hugo_#{version}_Linux-64bit.tar.gz"
+end
+
+def tarball_uri(version)
+  URI.join(HUGO_RELEASES_URI, "download/", "v#{version}/", tarball_name(version))
+end
+
+# Main #####################################################
+
+def ensure_latest_hugo_binary(target_dir)
+  latest_version = get_latest_hugo_version
+  tarball_path = File.join(target_dir, tarball_name(latest_version))
+
+  return [latest_version, :cache] if File.exist?(tarball_path)
+
+  clear_dir(target_dir)
+  download_file(tarball_uri(latest_version), tarball_path)
+  unpack_tarball(tarball_path, target_dir)
+
+  [latest_version, :web]
+end
+
+def main(cache_dir_)
+  ensure_dir(cache_dir_)
+
+  log_step("Downloading latest Hugo if necessary")
+  version, binary_source = ensure_latest_hugo_binary(cache_dir_)
+  log_info("Hugo version: #{version}")
+  log_info("Hugo binary from: #{binary_source}")
+
+  log_step("Adding Hugo to PATH")
+  add_to_PATH(cache_dir_)
+end
+
+__, cache_dir, __ = ARGV
+main(cache_dir)
