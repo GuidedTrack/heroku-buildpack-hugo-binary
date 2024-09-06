@@ -114,5 +114,5 @@ def main(cache_dir_):
 if __name__ == "__main__":
     import sys
 
-    _, cache_dir, _ = sys.argv
+    _, _, cache_dir, _ = sys.argv
     main(cache_dir)
